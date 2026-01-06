@@ -1,3 +1,8 @@
+let lastSpeedIncreaseTime = 0;
+const speedincreaseinterval = 7500;
+const speedincrement = 0.5;
+
+
 let highscore = Number(localStorage.getItem("highscore")) || 0;
 
 let playerSprite = new Image();
@@ -10,6 +15,21 @@ let enemy = {
 enemy.monster1.src = "./assets/enemies/monster1.png";
 enemy.monster2.src = "./assets/enemies/monster2.png";
 enemy.bat.src = "./assets/enemies/bat.png";
+
+const enemysprites = {
+    monster: {
+        frameWidth: 150,
+        frameHeight: 150,
+    },
+    necromacer: {
+        frameWidth: 56,
+        frameHeight: 56,
+    },
+    bat: {
+        frameWidth: 64,
+        frameHeight: 64,
+    }
+};
 
 let playerFrame = 0;
 let playerFrameCount = 8;
@@ -37,8 +57,8 @@ const enemytype = [
     {
         type: "bat",
         sprite: enemy.bat,
-        width: 120,
-        height: 80,
+        width: 200,
+        height: 160,
         yOffset: -100,
         requiresShrink: true,
     }
@@ -73,7 +93,7 @@ function getGroundY() {
 
 let score = 0;
 let speedTimer = 0;
-let gameSpeed = 3;
+let gameSpeed = 5;
 const gameheight = 360;
 
 let minObstacleGap = 400;
@@ -84,7 +104,7 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 const neon = {
-    red: "#ff0055",
+    red: "#ff0000ff",
     green: "#00ff99",
     blue: "#00ccff",
 }
@@ -93,7 +113,7 @@ let obstacles = [];
 
 let player = {
     x: 100,
-    y: -20,
+    y: -30,
     width: 100,
     height: 100,
     velocityY: 0,
@@ -119,6 +139,12 @@ let boost = {
 
 function getgameoffsetY() {
     return Math.floor((canvas.height - gameheight) / 2);
+}
+
+function pause() {
+    if (!gameStarted || gameOver) return;
+
+    gamepaused = !gamepaused;
 }
 
 function isBoostSafe(x) {
@@ -150,7 +176,7 @@ function randomGap() {
 }
 
 function update() {
-    if ( !gameStarted || gameOver ) return;
+    if (!gameStarted || gameOver) return;
     if (pausecooldown > 0) {
         pausecooldown--;
         if (pausecooldown === 0) {
@@ -167,11 +193,11 @@ function update() {
     if (gameStarted && !gameOver) {
         score += 0.3;
     }
-    speedTimer++;
 
-    if (speedTimer > 600) {
-        gameSpeed += 0.3;
-        speedTimer = 0;
+    const now = performance.now();
+    if (now - lastSpeedIncreaseTime > speedincreaseinterval) {
+        gameSpeed += speedincrement;
+        lastSpeedIncreaseTime = now;
     }
 
     for (let i = 0; i < obstacles.length; i++) {
@@ -218,13 +244,23 @@ function update() {
     let lastObstacle = obstacles[obstacles.length - 1];
 
     if (obstacles.length < maxenemies && enemyspawncooldown === 0 && (!lastObstacle || lastObstacle.x < canvas.width - nextObstacleDistance)) {
-        
+
         let enemyType;
         do {
             enemyType = enemytype[Math.floor(Math.random() * enemytype.length)];
         } while (enemyType.type === lastenemytype);
 
         lastenemytype = enemyType.type;
+
+        const spriteData = enemysprites[enemyType.type];
+
+        let yPos = getGroundY() - enemyType.height + enemyType.yOffset;
+
+        if (enemyType.type === "bat") {
+            const minY = getGroundY() - 220;
+            const maxY = getGroundY() - 120;
+            yPos = minY + Math.random() * (maxY - minY);
+        }
 
         obstacles.push({
             type: enemyType.type,
@@ -233,11 +269,14 @@ function update() {
             x: canvas.width,
             width: enemyType.width,
             height: enemyType.height,
-            y: getGroundY() - enemyType.height + enemyType.yOffset,
+            y: yPos,
             frame: 0,
-            frameCount: enemyType.type === "bat" ? 6 : 8,
             frameTimer: 0,
+            frameWidth: spriteData.frameWidth,
+            frameHeight: spriteData.frameHeight,
+            frameCount: Math.floor(enemyType.sprite.width / spriteData.frameWidth),
         });
+
 
         enemyspawncooldown = 40;
 
@@ -298,7 +337,7 @@ function update() {
         player.invincibletimer--;
         if (player.invincibletimer <= 0) {
             player.invincible = false;
-            gameSpeed = 3 + Math.floor(score / 300);
+            gameSpeed = 5 + Math.floor(score / 100);
         }
 
     }
@@ -345,22 +384,26 @@ function draw() {
 
     for (let i = 0; i < obstacles.length; i++) {
         let o = obstacles[i];
+        if (!o.sprite.complete) continue;
 
-        const frameWidth = o.sprite.width / o.frameCount;
+        ctx.save();
 
-        if (o.sprite && o.sprite.complete) {
-            ctx.drawImage(
-                o.sprite,
-                o.frame * frameWidth,
-                0,
-                frameWidth,
-                o.sprite.height,
-                o.x,
-                worldY + o.y,
-                o.width,
-                o.height,
-            );
-        }
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = neon.red;
+
+        ctx.drawImage(
+            o.sprite,
+            o.frame * o.frameWidth,
+            0,
+            o.frameWidth,
+            o.frameHeight,
+            o.x,
+            worldY + o.y,
+            o.width,
+            o.height
+        );
+
+        ctx.restore();
     }
 
     ctx.fillStyle = "white";
@@ -380,19 +423,6 @@ function draw() {
             40,
         );
         ctx.restore();
-    }
-
-    if (showhelp) {
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = "white";
-        ctx.font = "18px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("CONTROLS", canvas.width / 2, canvas.height / 2 - 60);
-        ctx.fillText("SPACE (key) / ↑ (up arrow) → Jump", canvas.width / 2, canvas.height / 2 - 20);
-        ctx.fillText("↓ (down arrow) → Shrink", canvas.width / 2, canvas.height / 2 + 10);
-        ctx.fillText("R (key) → Restart", canvas.width / 2, canvas.height / 2 + 40);
     }
 
     if (!gameStarted || gameOver) {
@@ -425,6 +455,32 @@ function draw() {
             canvas.width / 2,
             canvas.height / 2 + 10
         );
+    }
+
+    if (gamepaused && !showhelp) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.font = "32px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
+        ctx.font = "16px monospace";
+        ctx.fillText("Press P again to Resume", canvas.width / 2, canvas.height / 2 + 40);
+    }
+
+    if (showhelp) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.font = "18px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("CONTROLS", canvas.width / 2, canvas.height / 2 - 60);
+        ctx.fillText("SPACE (key) / ↑ (up arrow) === Jump", canvas.width / 2, canvas.height / 2 - 20);
+        ctx.fillText("↓ (down arrow) === Shrink", canvas.width / 2, canvas.height / 2 + 10);
+        ctx.fillText("R (key) / Enter (key) === Restart", canvas.width / 2, canvas.height / 2 + 40);
+        ctx.fillText("P (key) === Pause / Resume", canvas.width / 2, canvas.height / 2 + 70);
     }
 
     ctx.fillStyle = "#111";
@@ -478,7 +534,18 @@ document.addEventListener("keydown", (e) => {
     if (e.code === "KeyR" && gameOver) {
         gameOver = false;
         obstacles = [];
-        gameSpeed = 3;
+        gameSpeed = 5;
+        score = 0;
+        speedTimer = 0;
+        player.y = 220;
+        player.velocityY = 0;
+        player.onGround = true;
+        lastSpeedIncreaseTime = performance.now();
+    }
+    if (e.code === "Enter" && gameOver) {
+        gameOver = false;
+        obstacles = [];
+        gameSpeed = 5;
         score = 0;
         speedTimer = 0;
         player.y = 220;
@@ -486,6 +553,13 @@ document.addEventListener("keydown", (e) => {
         player.onGround = true;
     }
 });
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "p" || e.key === "P") {
+        pause();
+    }
+})
+
 canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
