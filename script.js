@@ -1,5 +1,15 @@
+let highscore = Number(localStorage.getItem("highscore")) || 0;
+
 let playerSprite = new Image();
 playerSprite.src = "./assets/player/shadowman.png";
+let enemy = {
+    monster1: new Image(),
+    monster2: new Image(),
+    bat: new Image(),
+};
+enemy.monster1.src = "./assets/enemies/monster1.png";
+enemy.monster2.src = "./assets/enemies/monster2.png";
+enemy.bat.src = "./assets/enemies/bat.png";
 
 let playerFrame = 0;
 let playerFrameCount = 8;
@@ -7,18 +17,67 @@ let playerFrameWidth = 64;
 let playerFrameHeight = 64;
 let playerFrameTimer = 0;
 
+const enemytype = [
+    {
+        type: "monster",
+        sprite: enemy.monster1,
+        width: 100,
+        height: 100,
+        yOffset: -20,
+        requiresShrink: false,
+    },
+    {
+        type: "necromacer",
+        sprite: enemy.monster2,
+        width: 100,
+        height: 100,
+        yOffset: -20,
+        requiresShrink: false,
+    },
+    {
+        type: "bat",
+        sprite: enemy.bat,
+        width: 120,
+        height: 80,
+        yOffset: -100,
+        requiresShrink: true,
+    }
+];
+let lastenemytype = null;
+
+const maxenemies = 3;
+
+let enemyspawncooldown = 0;
+
 let bgimage = new Image();
 bgimage.src = "./assets/background/bgasset.jpg";
 
+let boostsprite = new Image();
+boostsprite.src = "./assets/boost/boost.png";
+
+let showhelp = false;
+
+let gameStarted = false;
+
+let gamepaused = false;
+
+let pausecooldown = 0;
+
 let gameOver = false;
+
+const groundpadding = 20;
+
+function getGroundY() {
+    return gameheight - groundpadding;
+}
 
 let score = 0;
 let speedTimer = 0;
-let gameSpeed = 6;
+let gameSpeed = 3;
 const gameheight = 360;
 
-let minObstacleGap = 250;
-let maxObstacleGap = 450;
+let minObstacleGap = 400;
+let maxObstacleGap = 700;
 let nextObstacleDistance = randomGap();
 
 const canvas = document.getElementById("game");
@@ -30,24 +89,22 @@ const neon = {
     blue: "#00ccff",
 }
 
-let obstacles = [
-    {
-        x: 800,
-        y: 220,
-        width: 40,
-        height: 60,
-    }
-];
+let obstacles = [];
 
 let player = {
     x: 100,
-    y: gameheight - 120,
-    width: 80,
+    y: -20,
+    width: 100,
     height: 100,
     velocityY: 0,
     gravity: 0.7,
     jumpPower: -16,
     onGround: true,
+    isShrinking: false,
+    normalheight: 100,
+    shrinkheight: 60,
+    invincible: false,
+    invincibletimer: 0,
 }
 
 const boostSafeDistance = 180;
@@ -62,17 +119,6 @@ let boost = {
 
 function getgameoffsetY() {
     return Math.floor((canvas.height - gameheight) / 2);
-}
-
-function drawbg(tile, dx, dy, scale = 4) {
-    ctx.drawImage(
-        tileset,
-        tile.x, tile.y,
-        tilesize, tilesize,
-        dx, dy,
-        tilesize * scale,
-        tilesize * scale,
-    );
 }
 
 function isBoostSafe(x) {
@@ -104,20 +150,66 @@ function randomGap() {
 }
 
 function update() {
-    if (gameOver) return;
+    if ( !gameStarted || gameOver ) return;
+    if (pausecooldown > 0) {
+        pausecooldown--;
+        if (pausecooldown === 0) {
+            gamepaused = false;
+        }
+    }
 
-    score++;
+    if (gamepaused) return;
+
+    if (enemyspawncooldown > 0) {
+        enemyspawncooldown--;
+    }
+
+    if (gameStarted && !gameOver) {
+        score += 0.3;
+    }
     speedTimer++;
 
-    if (speedTimer > 300) {
-        gameSpeed += 0.4 + Math.random() * 2;
+    if (speedTimer > 600) {
+        gameSpeed += 0.3;
         speedTimer = 0;
     }
 
     for (let i = 0; i < obstacles.length; i++) {
-        obstacles[i].x -= gameSpeed;
-        if (isColliding(player, obstacles[i])) {
-            gameOver = true;
+        let o = obstacles[i];
+
+        o.x -= gameSpeed;
+
+        o.frameTimer++;
+        if (o.frameTimer > 10) {
+            o.frame = (o.frame + 1) % o.frameCount;
+            o.frameTimer = 0;
+        }
+
+        let playerbox = {
+            x: player.x + 20,
+            y: player.y + 10,
+            width: player.width - 40,
+            height: player.height - 20,
+        };
+
+        let enemybox = {
+            x: o.x + 20,
+            y: o.y + 20,
+            width: o.width - 40,
+            height: o.height - 30,
+        };
+
+        if (isColliding(playerbox, enemybox)) {
+            if (o.requiresShrink && player.isShrinking) {
+
+            } else if (!player.invincible) {
+                gameOver = true;
+
+                if (score > highscore) {
+                    highscore = Math.floor(score);
+                    localStorage.setItem("highscore", highscore);
+                }
+            }
         }
     }
 
@@ -125,13 +217,29 @@ function update() {
 
     let lastObstacle = obstacles[obstacles.length - 1];
 
-    if (!lastObstacle || lastObstacle.x < canvas.width - nextObstacleDistance) {
+    if (obstacles.length < maxenemies && enemyspawncooldown === 0 && (!lastObstacle || lastObstacle.x < canvas.width - nextObstacleDistance)) {
+        
+        let enemyType;
+        do {
+            enemyType = enemytype[Math.floor(Math.random() * enemytype.length)];
+        } while (enemyType.type === lastenemytype);
+
+        lastenemytype = enemyType.type;
+
         obstacles.push({
+            type: enemyType.type,
+            sprite: enemyType.sprite,
+            requiresShrink: enemyType.requiresShrink,
             x: canvas.width,
-            y: 220,
-            width: 40,
-            height: 60,
+            width: enemyType.width,
+            height: enemyType.height,
+            y: getGroundY() - enemyType.height + enemyType.yOffset,
+            frame: 0,
+            frameCount: enemyType.type === "bat" ? 6 : 8,
+            frameTimer: 0,
         });
+
+        enemyspawncooldown = 40;
 
         nextObstacleDistance = randomGap();
     }
@@ -139,8 +247,10 @@ function update() {
     player.velocityY += player.gravity;
     player.y += player.velocityY;
 
-    if (player.y + player.height >= 280) {
-        player.y = 280 - player.height;
+
+
+    if (player.y + player.height >= getGroundY()) {
+        player.y = getGroundY() - player.height;
         player.velocityY = 0;
         player.onGround = true;
     }
@@ -158,13 +268,17 @@ function update() {
     if (boost.active) {
         boost.x -= gameSpeed;
 
-        if (isColliding(player, {
+        let boostbox = {
             x: boost.x,
             y: boost.y,
             width: boost.size,
             height: boost.size,
-        })) {
-            gameSpeed += 3;
+        };
+
+        if (isColliding({ x: player.x + 10, y: player.y + 10, width: player.width - 20, height: player.height - 20 }, boostbox)) {
+            player.invincible = true;
+            player.invincibletimer = 300 + Math.random() * 300;
+            gameSpeed += 2;
             boost.active = false;
         }
     }
@@ -179,6 +293,16 @@ function update() {
         playerFrame = (playerFrame + 1) % playerFrameCount;
         playerFrameTimer = 0;
     }
+
+    if (player.invincible) {
+        player.invincibletimer--;
+        if (player.invincibletimer <= 0) {
+            player.invincible = false;
+            gameSpeed = 3 + Math.floor(score / 300);
+        }
+
+    }
+
 }
 
 function draw() {
@@ -195,6 +319,14 @@ function draw() {
 
     const worldY = getgameoffsetY();
 
+    ctx.save();
+
+    if (player.invincible) {
+        ctx.globalAlpha = Math.random() > 0.5 ? 0.4 : 1;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = neon.blue;
+    }
+
     ctx.drawImage(
         playerSprite,
         playerFrame * playerFrameWidth,
@@ -202,44 +334,106 @@ function draw() {
         playerFrameWidth,
         playerFrameHeight,
         player.x,
-        worldY + player.y,
+        worldY + player.y - 10,
         player.width,
         player.height
     );
 
-    ctx.fillStyle = "red";
+    ctx.restore();
+
+    ctx.globalAlpha = 1;
+
     for (let i = 0; i < obstacles.length; i++) {
-        drawGlowRect(
-            obstacles[i].x,
-            worldY + obstacles[i].y,
-            obstacles[i].width,
-            obstacles[i].height,
-            neon.red,
-        )
+        let o = obstacles[i];
+
+        const frameWidth = o.sprite.width / o.frameCount;
+
+        if (o.sprite && o.sprite.complete) {
+            ctx.drawImage(
+                o.sprite,
+                o.frame * frameWidth,
+                0,
+                frameWidth,
+                o.sprite.height,
+                o.x,
+                worldY + o.y,
+                o.width,
+                o.height,
+            );
+        }
     }
 
     ctx.fillStyle = "white";
     ctx.font = "16px monospace";
     ctx.textAlign = "left";
-    ctx.fillText("Score: " + score, 20, 30);
+    ctx.fillText("Score: " + Math.floor(score), 20, 30);
 
     if (boost.active) {
-        drawGlowRect(
+        ctx.save();
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = neon.blue;
+        ctx.drawImage(
+            boostsprite,
             boost.x,
-            boost.y,
-            boost.size,
-            boost.size,
-            boost.color,
+            worldY + boost.y,
+            40,
+            40,
+        );
+        ctx.restore();
+    }
+
+    if (showhelp) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.font = "18px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("CONTROLS", canvas.width / 2, canvas.height / 2 - 60);
+        ctx.fillText("SPACE (key) / ↑ (up arrow) → Jump", canvas.width / 2, canvas.height / 2 - 20);
+        ctx.fillText("↓ (down arrow) → Shrink", canvas.width / 2, canvas.height / 2 + 10);
+        ctx.fillText("R (key) → Restart", canvas.width / 2, canvas.height / 2 + 40);
+    }
+
+    if (!gameStarted || gameOver) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.font = "28px monospace";
+        ctx.textAlign = "center";
+
+        ctx.fillText(
+            gameOver ? "GAME OVER" : "SHADOW RUNNER",
+            canvas.width / 2,
+            canvas.height / 2 - 40,
+        );
+        ctx.fillText(
+            gameOver ? "SCORE: " + Math.floor(score) : "",
+            canvas.width / 2,
+            canvas.height / 2 + 40
+        );
+        ctx.fillText(
+            gameOver ? "HIGH SCORE: " + highscore : "",
+            canvas.width / 2,
+            canvas.height / 2 + 70,
+        );
+
+        ctx.font = "18px monospace";
+        ctx.fillText(
+            gameOver ? "Press R to Restart" : "Press Space to Start",
+            canvas.width / 2,
+            canvas.height / 2 + 10
         );
     }
 
-    if (gameOver) {
-        ctx.fillStyle = "white";
-        ctx.font = "24px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("GAME OVER", canvas.width / 2, 130);
-        ctx.fillText("Press R to Restart", canvas.width / 2, 160);
-    }
+    ctx.fillStyle = "#111";
+    ctx.fillRect(canvas.width - 50, 20, 30, 30);
+
+    ctx.fillStyle = "white";
+    ctx.font = "20px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(showhelp ? "X" : "?", canvas.width - 35, 42);
 }
 
 function gameLoop() {
@@ -251,24 +445,40 @@ function gameLoop() {
 gameLoop();
 
 document.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && player.onGround) {
-        player.velocityY = player.jumpPower;
-        player.onGround = false;
+    if (e.code === "Space" || e.code === "ArrowUp") {
+        if (!gameStarted) {
+            gameStarted = true;
+            return;
+        }
+
+        if (player.onGround) {
+            player.velocityY = player.jumpPower;
+            player.onGround = false;
+        }
+    }
+});
+
+document.addEventListener("keydown", (e) => {
+    if (e.code === "ArrowDown" && !player.isShrinking) {
+        player.isShrinking = true;
+        player.y += (player.normalheight - player.shrinkheight);
+        player.height = player.shrinkheight;
+    }
+});
+
+document.addEventListener("keyup", (e) => {
+    if (e.code === "ArrowDown") {
+        player.isShrinking = false;
+        player.y -= (player.normalheight - player.shrinkheight);
+        player.height = player.normalheight;
     }
 });
 
 document.addEventListener("keydown", (e) => {
     if (e.code === "KeyR" && gameOver) {
         gameOver = false;
-        obstacles = [
-            {
-                x: canvas.width,
-                y: 220,
-                width: 40,
-                height: 60,
-            }
-        ];
-        gameSpeed = 6;
+        obstacles = [];
+        gameSpeed = 3;
         score = 0;
         speedTimer = 0;
         player.y = 220;
@@ -276,10 +486,24 @@ document.addEventListener("keydown", (e) => {
         player.onGround = true;
     }
 });
+canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    if (mx > canvas.width - 50 && mx < canvas.width - 20 && my > 20 && my < 50) {
+        showhelp = !showhelp;
+        if (showhelp) {
+            gamepaused = true;
+        } else {
+            pausecooldown = 60;
+        }
+    }
+});
 
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    player.y = getGroundY() - player.height;
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
